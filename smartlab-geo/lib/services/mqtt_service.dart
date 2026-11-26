@@ -15,6 +15,7 @@ class MqttConfig {
   final String topicCommand;
   final String topicStatus;
   final String topicAvailability;
+  final String topicIp;
 
   const MqttConfig({
     this.host = 'mqtt.vantara.my.id',
@@ -24,6 +25,7 @@ class MqttConfig {
     this.topicCommand = 'smartlab-geo/door/exit/command',
     this.topicStatus = 'smartlab-geo/door/exit/status',
     this.topicAvailability = 'smartlab-geo/door/exit/availability',
+    this.topicIp = 'smartlab-geo/door/exit/ip',
   });
 
   static Future<MqttConfig> load() async {
@@ -76,6 +78,7 @@ class MqttService extends ChangeNotifier {
   bool isConnecting = false;
   String deviceAvailability = 'unknown'; // 'online', 'offline', 'unknown'
   String relayStatus = 'OFF'; // 'ON' atau 'OFF'
+  String deviceIp = '-';
   String? errorMessage;
 
   final List<MqttLogEntry> logs = [];
@@ -181,6 +184,7 @@ class MqttService extends ChangeNotifier {
 
     _client?.subscribe(config.topicStatus, MqttQos.atMostOnce);
     _client?.subscribe(config.topicAvailability, MqttQos.atMostOnce);
+    _client?.subscribe(config.topicIp, MqttQos.atMostOnce);
 
     _addLog('SYSTEM', 'Terhubung ke ${config.host}:${config.port}');
     HomeWidgetService.updateWidgetState(
@@ -233,6 +237,8 @@ class MqttService extends ChangeNotifier {
               status: relayStatus,
               availability: deviceAvailability,
             );
+          } else if (topic == config.topicIp) {
+            deviceIp = payload;
           }
           notifyListeners();
         }

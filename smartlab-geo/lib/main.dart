@@ -453,7 +453,9 @@ class _DoorControlPageState extends State<DoorControlPage> {
                         ),
                       ),
                       Text(
-                        '${_mqtt.config.host}:${_mqtt.config.port}',
+                        _mqtt.deviceIp != '-'
+                            ? '${_mqtt.config.host} • Wemos IP: ${_mqtt.deviceIp}'
+                            : '${_mqtt.config.host}:${_mqtt.config.port}',
                         style: const TextStyle(
                           fontSize: 11,
                           color: Colors.white54,

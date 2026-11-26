@@ -1,5 +1,10 @@
 
 #include <ESP8266WiFi.h>
+#include <ESP8266mDNS.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
+#include <ESP8266WebServer.h>
+#include <ESP8266HTTPUpdateServer.h>
 #include <PubSubClient.h>
 
 // ============================================
@@ -8,6 +13,14 @@
 
 const char* WIFI_SSID     = "Lab GEO 2.4GHz";
 const char* WIFI_PASSWORD = "#WelcomeGEOUNO";
+
+// ============================================
+// OTA CONFIGURATION (Arduino IDE & Web Browser)
+// ============================================
+
+const char* OTA_HOSTNAME = "SmartLab-GEO-DoorExit";
+const char* OTA_WEB_USER = "admin";
+const char* OTA_PASSWORD = "admin";
 
 // ============================================
 // MQTT CONFIGURATION
@@ -34,6 +47,9 @@ const char* TOPIC_STATUS =
 const char* TOPIC_AVAILABILITY =
   "smartlab-geo/door/exit/availability";
 
+const char* TOPIC_IP =
+  "smartlab-geo/door/exit/ip";
+
 // ============================================
 // HARDWARE CONFIGURATION
 // ============================================
@@ -56,7 +72,11 @@ const unsigned long OPEN_DURATION = 1000;
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
+ESP8266WebServer httpServer(80);
+ESP8266HTTPUpdateServer httpUpdater;
+
 bool relayActive = false;
+bool otaInitialized = false;
 
 unsigned long relayStartTime = 0;
 unsigned long lastMQTTAttempt = 0;
@@ -157,6 +177,69 @@ void mqttCallback(
 }
 
 // ============================================
+// OTA SETUP (Arduino IDE Network Port & Web /update)
+// ============================================
+
+void setupOTA() {
+  if (otaInitialized) return;
+
+  // 1. Konfigurasi ArduinoOTA (Upload langsung via WiFi dari Arduino IDE)
+  ArduinoOTA.setHostname(OTA_HOSTNAME);
+  if (strlen(OTA_PASSWORD) > 0) {
+    ArduinoOTA.setPassword(OTA_PASSWORD);
+  }
+
+  ArduinoOTA.onStart([]() {
+    // Pastikan relay dimatikan demi keamanan saat proses flash firmware dimulai
+    closeRelay();
+    Serial.println("[OTA] Memulai update firmware...");
+  });
+
+  ArduinoOTA.onEnd([]() {
+    Serial.println("\n[OTA] Update selesai! Rebooting...");
+  });
+
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("[OTA] Progress: %u%%\r", (progress / (total / 100)));
+  });
+
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("\n[OTA] Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+  });
+
+  ArduinoOTA.begin();
+
+  // 2. Konfigurasi Web OTA (Upload file .bin via Browser di http://<IP_WEMOS>/update)
+  httpUpdater.setup(&httpServer, "/update", OTA_WEB_USER, OTA_PASSWORD);
+
+  httpServer.on("/", HTTP_GET, []() {
+    String html = "<html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                  "<title>SmartLab-GEO OTA</title>"
+                  "<style>body{font-family:sans-serif;background:#0f172a;color:#f8fafc;text-align:center;padding:30px;}"
+                  ".card{background:#1e293b;padding:24px;border-radius:16px;max-width:400px;margin:auto;}"
+                  "a.btn{display:inline-block;margin-top:16px;padding:12px 20px;background:#2563eb;color:#fff;"
+                  "text-decoration:none;border-radius:10px;font-weight:bold;}</style></head><body>"
+                  "<div class='card'><h2>SmartLab-GEO Door Exit</h2>"
+                  "<p>IP Address: <b>" + WiFi.localIP().toString() + "</b></p>"
+                  "<p>Status Relay: <b>" + String(relayActive ? "ON" : "OFF") + "</b></p>"
+                  "<a class='btn' href='/update'>Update Firmware (Web OTA)</a></div></body></html>";
+    httpServer.send(200, "text/html", html);
+  });
+
+  httpServer.begin();
+  otaInitialized = true;
+
+  Serial.println("[WIFI] Connected! IP: " + WiFi.localIP().toString());
+  Serial.println("[OTA] ArduinoOTA Ready! Hostname: " + String(OTA_HOSTNAME));
+  Serial.println("[OTA] Web OTA Ready! Buka: http://" + WiFi.localIP().toString() + "/update");
+}
+
+// ============================================
 // WIFI CONNECTION
 // ============================================
 
@@ -166,6 +249,7 @@ void connectWiFi() {
   Serial.println("[WIFI] Connecting...");
 
   WiFi.mode(WIFI_STA);
+  WiFi.hostname(OTA_HOSTNAME);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
 
@@ -253,6 +337,14 @@ void connectMQTT() {
       true
     );
 
+    // Publish local IP address so user knows where to access Web OTA
+    String ipStr = WiFi.localIP().toString();
+    mqttClient.publish(
+      TOPIC_IP,
+      ipStr.c_str(),
+      true
+    );
+
     Serial.println("[MQTT] Subscribed:");
     Serial.println(TOPIC_COMMAND);
 
@@ -303,8 +395,15 @@ void loop() {
   // Check WiFi connection
   checkWiFi();
 
-  // MQTT connection management
+  // MQTT & OTA connection management
   if (WiFi.status() == WL_CONNECTED) {
+
+    if (!otaInitialized) {
+      setupOTA();
+    }
+
+    ArduinoOTA.handle();
+    httpServer.handleClient();
 
     if (!mqttClient.connected()) {
 
