@@ -78,7 +78,6 @@ export default function App() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
 
   const clientRef = useRef(null);
-  const autoTriggeredRef = useRef(false);
   const bridgeIntervalRef = useRef(null);
 
   const showToast = (msg) => {
@@ -165,17 +164,6 @@ export default function App() {
         syncFromCloudBridge(false);
       }, 4000);
 
-      const params = new URLSearchParams(window.location.search);
-      if (
-        !autoTriggeredRef.current &&
-        (params.get('action') === 'unlock' || config.autoUnlockOnLaunch)
-      ) {
-        autoTriggeredRef.current = true;
-        setTimeout(() => {
-          triggerDoorCommand('ON', true);
-        }, 300);
-      }
-
       return () => {
         if (bridgeIntervalRef.current) clearInterval(bridgeIntervalRef.current);
       };
@@ -214,17 +202,6 @@ export default function App() {
         [config.topicStatus, config.topicAvailability, config.topicIp],
         { qos: 0 }
       );
-
-      const params = new URLSearchParams(window.location.search);
-      if (
-        !autoTriggeredRef.current &&
-        (params.get('action') === 'unlock' || config.autoUnlockOnLaunch)
-      ) {
-        autoTriggeredRef.current = true;
-        setTimeout(() => {
-          triggerDoorCommand('ON', true);
-        }, 250);
-      }
     });
 
     client.on('reconnect', () => {
@@ -811,33 +788,6 @@ export default function App() {
                   placeholder={wemosIp !== '-' ? wemosIp : '192.168.1.xxx'}
                 />
               </div>
-
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  margin: '10px 0 16px',
-                  fontSize: '0.76rem',
-                  color: '#cbd5e1',
-                  cursor: 'pointer',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={formCfg.autoUnlockOnLaunch}
-                  onChange={(e) =>
-                    setFormCfg({
-                      ...formCfg,
-                      autoUnlockOnLaunch: e.target.checked,
-                    })
-                  }
-                />
-                <span>
-                  <strong>Mode 1-Tap Widget:</strong> Langsung kirim perintah
-                  BUKA PINTU begitu ikon aplikasi di layar HP disentuh.
-                </span>
-              </label>
 
               <button type="submit" className="primary-btn">
                 <RefreshCw size={16} />
