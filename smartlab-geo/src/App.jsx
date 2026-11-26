@@ -38,6 +38,7 @@ const DEFAULT_CONFIG = {
   topicStatus: 'smartlab-geo/door/exit/status',
   topicAvailability: 'smartlab-geo/door/exit/availability',
   topicIp: 'smartlab-geo/door/exit/ip',
+  topicDelay: 'smartlab-geo/door/exit/delay',
   wemosDirectIp: '',
   autoUnlockOnLaunch: false,
 };
@@ -64,6 +65,11 @@ export default function App() {
   const [wemosIp, setWemosIp] = useState(
     () => localStorage.getItem('smartlab_wemos_ip') || '-'
   );
+  // Delay Auto-OFF dalam milidetik (default 1000 ms = 1 detik, 0 = Manual / Hold ON)
+  const [autoOffDelayMs, setAutoOffDelayMs] = useState(() => {
+    const saved = localStorage.getItem('smartlab_delay_ms');
+    return saved !== null ? Number(saved) : 1000;
+  });
 
   const [isPressing, setIsPressing] = useState(false);
   const [unlockCount, setUnlockCount] = useState(
@@ -124,6 +130,10 @@ export default function App() {
         if (data.ip) {
           setWemosIp(data.ip);
           localStorage.setItem('smartlab_wemos_ip', data.ip);
+        }
+        if (typeof data.delay === 'number' && !Number.isNaN(data.delay)) {
+          setAutoOffDelayMs(data.delay);
+          localStorage.setItem('smartlab_delay_ms', String(data.delay));
         }
         if (isInitial) {
           addLog(
@@ -199,7 +209,12 @@ export default function App() {
       addLog('SYSTEM', `Terhubung ke ${config.wsUrl}`, 'SYS');
 
       client.subscribe(
-        [config.topicStatus, config.topicAvailability, config.topicIp],
+        [
+          config.topicStatus,
+          config.topicAvailability,
+          config.topicIp,
+          config.topicDelay || 'smartlab-geo/door/exit/delay',
+        ],
         { qos: 0 }
       );
     });
@@ -227,6 +242,14 @@ export default function App() {
       } else if (topic === config.topicIp) {
         setWemosIp(payload);
         localStorage.setItem('smartlab_wemos_ip', payload);
+      } else if (
+        topic === (config.topicDelay || 'smartlab-geo/door/exit/delay')
+      ) {
+        const parsed = Number(payload);
+        if (!Number.isNaN(parsed) && parsed >= 0) {
+          setAutoOffDelayMs(parsed);
+          localStorage.setItem('smartlab_delay_ms', String(parsed));
+        }
       }
     });
 
@@ -244,6 +267,48 @@ export default function App() {
     setLastUnlockTime(nowTime);
     localStorage.setItem('smartlab_unlock_count', String(nextCount));
     localStorage.setItem('smartlab_last_unlock', nowTime);
+  };
+
+  const updateAutoOffDelay = async (newMs) => {
+    const cleanMs = Math.max(0, Math.min(300000, Number(newMs) || 0));
+    setAutoOffDelayMs(cleanMs);
+    localStorage.setItem('smartlab_delay_ms', String(cleanMs));
+
+    const delayTopic = config.topicDelay || 'smartlab-geo/door/exit/delay';
+    const payloadStr = String(cleanMs);
+    const label =
+      cleanMs === 0 ? 'Mode Manual (Hold ON)' : `${(cleanMs / 1000).toFixed(cleanMs % 1000 === 0 ? 0 : 1)} Detik`;
+
+    // 1. Jika terhubung via Direct WebSocket MQTT
+    const client = clientRef.current;
+    if (client && client.connected) {
+      client.publish(delayTopic, payloadStr, { qos: 1, retain: true });
+      addLog(delayTopic, `${payloadStr} ms (${label})`, 'TX');
+      showToast(`Delay Auto-OFF diubah ke ${label}`);
+      return;
+    }
+
+    // 2. Jika berjalan di Vercel Public HTTPS (/api/mqtt)
+    try {
+      const res = await fetch('/api/mqtt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          command: payloadStr,
+          topic: delayTopic,
+          retain: true,
+          username: config.username,
+          password: config.password,
+        }),
+      });
+      if (res.ok) {
+        addLog(delayTopic, `${payloadStr} ms (${label})`, 'TX');
+        showToast(`Delay Auto-OFF disimpan: ${label}`);
+        return;
+      }
+    } catch {}
+
+    showToast(`Delay Auto-OFF diset: ${label}`);
   };
 
   const triggerDoorCommand = async (cmd = 'ON', isAutoShortcut = false) => {
@@ -290,10 +355,12 @@ export default function App() {
         if (cmd === 'ON') {
           recordUnlockStats();
           showToast('Pintu Dibuka via Cloud HTTPS!');
-          setTimeout(() => {
-            setRelayStatus('OFF');
-            syncFromCloudBridge(false);
-          }, 1250);
+          if (autoOffDelayMs > 0) {
+            setTimeout(() => {
+              setRelayStatus('OFF');
+              syncFromCloudBridge(false);
+            }, autoOffDelayMs + 250);
+          }
         } else {
           setRelayStatus('OFF');
           showToast('Perintah OFF terkirim via Cloud HTTPS!');
@@ -557,6 +624,132 @@ export default function App() {
                   </div>
                 </div>
               </button>
+            </div>
+
+            {/* Dynamic Auto-OFF Delay Selector Card */}
+            <div className="glass-card">
+              <div className="card-header">
+                <div className="card-title">
+                  <RefreshCw size={15} color="#38bdf8" />
+                  <span>Durasi Delay Auto-OFF (Kunci Otomatis)</span>
+                </div>
+                <span
+                  style={{
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    color: autoOffDelayMs === 0 ? '#fbbf24' : '#34d399',
+                    fontFamily: 'JetBrains Mono, monospace',
+                    background: 'rgba(16, 185, 129, 0.14)',
+                    padding: '3px 9px',
+                    borderRadius: '999px',
+                  }}
+                >
+                  {autoOffDelayMs === 0
+                    ? 'MANUAL (HOLD)'
+                    : `${autoOffDelayMs / 1000} Detik`}
+                </span>
+              </div>
+
+              {/* Preset Pills */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(5, 1fr)',
+                  gap: '7px',
+                  marginBottom: '12px',
+                }}
+              >
+                {[
+                  { label: '1 dtk', ms: 1000 },
+                  { label: '3 dtk', ms: 3000 },
+                  { label: '5 dtk', ms: 5000 },
+                  { label: '10 dtk', ms: 10000 },
+                  { label: 'Manual', ms: 0 },
+                ].map((preset) => {
+                  const active = autoOffDelayMs === preset.ms;
+                  return (
+                    <button
+                      key={preset.ms}
+                      type="button"
+                      onClick={() => updateAutoOffDelay(preset.ms)}
+                      style={{
+                        padding: '8px 4px',
+                        borderRadius: '11px',
+                        border: active
+                          ? '1px solid #38bdf8'
+                          : '1px solid rgba(255,255,255,0.08)',
+                        background: active
+                          ? 'rgba(37, 99, 235, 0.35)'
+                          : 'rgba(15, 23, 42, 0.65)',
+                        color: active ? '#ffffff' : '#94a3b8',
+                        fontSize: '0.73rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                      }}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Custom Slider (1 - 30 Detik) */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: '0.68rem',
+                    color: '#64748b',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Custom:
+                </span>
+                <input
+                  type="range"
+                  min="1"
+                  max="30"
+                  step="1"
+                  value={
+                    autoOffDelayMs === 0
+                      ? 1
+                      : Math.min(30, Math.max(1, Math.round(autoOffDelayMs / 1000)))
+                  }
+                  onChange={(e) =>
+                    setAutoOffDelayMs(Number(e.target.value) * 1000)
+                  }
+                  onMouseUp={(e) =>
+                    updateAutoOffDelay(Number(e.target.value) * 1000)
+                  }
+                  onTouchEnd={(e) =>
+                    updateAutoOffDelay(Number(e.target.value) * 1000)
+                  }
+                  style={{
+                    flex: 1,
+                    accentColor: '#38bdf8',
+                    cursor: 'pointer',
+                  }}
+                />
+                <span
+                  style={{
+                    fontSize: '0.72rem',
+                    fontFamily: 'JetBrains Mono, monospace',
+                    color: '#cbd5e1',
+                    minWidth: '42px',
+                    textAlign: 'right',
+                  }}
+                >
+                  {autoOffDelayMs === 0
+                    ? 'OFF'
+                    : `${Math.round(autoOffDelayMs / 1000)}s`}
+                </span>
+              </div>
             </div>
 
             {/* Telemetry Summary Card */}

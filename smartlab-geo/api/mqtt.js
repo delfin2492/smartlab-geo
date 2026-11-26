@@ -7,6 +7,7 @@ const TOPIC_COMMAND = 'smartlab-geo/door/exit/command';
 const TOPIC_STATUS = 'smartlab-geo/door/exit/status';
 const TOPIC_AVAILABILITY = 'smartlab-geo/door/exit/availability';
 const TOPIC_IP = 'smartlab-geo/door/exit/ip';
+const TOPIC_DELAY = 'smartlab-geo/door/exit/delay';
 
 function parseBody(body) {
   if (!body) return {};
@@ -40,10 +41,11 @@ export default async function handler(req, res) {
   const connectUrl = `mqtt://${host}:${port}`;
 
   if (req.method === 'POST') {
-    const command = String(body.command || req.query?.command || 'ON')
+    const command = String(body.command ?? req.query?.command ?? 'ON')
       .trim()
       .toUpperCase();
     const topic = body.topic || req.query?.topic || TOPIC_COMMAND;
+    const retain = Boolean(body.retain ?? topic === TOPIC_DELAY);
 
     return new Promise((resolve) => {
       let finished = false;
@@ -80,12 +82,12 @@ export default async function handler(req, res) {
       }, 4500);
 
       client.on('connect', () => {
-        client.publish(topic, command, { qos: 1, retain: false }, (err) => {
+        client.publish(topic, command, { qos: 1, retain }, (err) => {
           clearTimeout(timer);
           if (err) {
             done(500, { ok: false, error: err.message });
           } else {
-            done(200, { ok: true, topic, command });
+            done(200, { ok: true, topic, command, retain });
           }
         });
       });
@@ -105,6 +107,7 @@ export default async function handler(req, res) {
       status: null,
       availability: null,
       ip: null,
+      delay: null,
     };
 
     const client = mqtt.connect(connectUrl, {
@@ -131,7 +134,7 @@ export default async function handler(req, res) {
 
     client.on('connect', () => {
       client.subscribe(
-        [TOPIC_STATUS, TOPIC_AVAILABILITY, TOPIC_IP],
+        [TOPIC_STATUS, TOPIC_AVAILABILITY, TOPIC_IP, TOPIC_DELAY],
         { qos: 0 },
         (err) => {
           if (err) {
@@ -153,15 +156,7 @@ export default async function handler(req, res) {
       else if (topic === TOPIC_AVAILABILITY)
         state.availability = val.toLowerCase();
       else if (topic === TOPIC_IP) state.ip = val;
-
-      if (
-        state.status !== null &&
-        state.availability !== null &&
-        state.ip !== null
-      ) {
-        clearTimeout(timeout);
-        done(200, state);
-      }
+      else if (topic === TOPIC_DELAY) state.delay = Number(val);
     });
 
     client.on('error', (err) => {

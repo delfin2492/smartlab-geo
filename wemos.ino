@@ -50,6 +50,9 @@ const char* TOPIC_AVAILABILITY =
 const char* TOPIC_IP =
   "smartlab-geo/door/exit/ip";
 
+const char* TOPIC_DELAY =
+  "smartlab-geo/door/exit/delay";
+
 // ============================================
 // HARDWARE CONFIGURATION
 // ============================================
@@ -62,8 +65,9 @@ const char* TOPIC_IP =
 // - OFF : INPUT / High-Z (memutus arus dari 5V -> relay benar-benar mati)
 #define AUTO_OFF_ENABLED true
 
-// Relay ON duration: 1000 ms (jika AUTO_OFF_ENABLED = true)
-const unsigned long OPEN_DURATION = 1000;
+// Durasi Relay ON dinamis (default: 1000 ms, bisa diubah via MQTT smartlab-geo/door/exit/delay)
+// Nilai 0 = Mode Manual (menyala terus sampai dikirim perintah OFF)
+unsigned long openDuration = 1000;
 
 // ============================================
 // GLOBAL VARIABLES
@@ -163,6 +167,17 @@ void mqttCallback(
       openDoor();
 
     }
+    else if (message.startsWith("ON:")) {
+
+      long customMs = message.substring(3).toInt();
+      if (customMs >= 0 && customMs <= 300000) {
+        openDuration = (unsigned long)customMs;
+        Serial.print("[DELAY] Set via ON command (ms): ");
+        Serial.println(openDuration);
+      }
+      openDoor();
+
+    }
     else if (message == "OFF") {
 
       closeRelay();
@@ -173,6 +188,16 @@ void mqttCallback(
       Serial.println("[MQTT] Invalid command. Use ON or OFF.");
 
     }
+  }
+  else if (String(topic) == TOPIC_DELAY) {
+
+    long newDelay = message.toInt();
+    if (newDelay >= 0 && newDelay <= 300000) {
+      openDuration = (unsigned long)newDelay;
+      Serial.print("[DELAY] Updated dynamic auto-OFF delay (ms): ");
+      Serial.println(openDuration);
+    }
+
   }
 }
 
@@ -248,7 +273,23 @@ void setupOTA() {
 
   httpServer.on("/api/status", HTTP_GET, []() {
     httpServer.sendHeader("Access-Control-Allow-Origin", "*");
-    String json = "{\"status\":\"" + String(relayActive ? "ON" : "OFF") + "\",\"ip\":\"" + WiFi.localIP().toString() + "\"}";
+    String json = "{\"status\":\"" + String(relayActive ? "ON" : "OFF") + "\",\"ip\":\"" + WiFi.localIP().toString() + "\",\"delay\":" + String(openDuration) + "}";
+    httpServer.send(200, "application/json", json);
+  });
+
+  httpServer.on("/api/delay", HTTP_ANY, []() {
+    httpServer.sendHeader("Access-Control-Allow-Origin", "*");
+    if (httpServer.hasArg("ms")) {
+      long newMs = httpServer.arg("ms").toInt();
+      if (newMs >= 0 && newMs <= 300000) {
+        openDuration = (unsigned long)newMs;
+        if (mqttClient.connected()) {
+          String msStr = String(openDuration);
+          mqttClient.publish(TOPIC_DELAY, msStr.c_str(), true);
+        }
+      }
+    }
+    String json = "{\"delay\":" + String(openDuration) + "}";
     httpServer.send(200, "application/json", json);
   });
 
@@ -348,8 +389,9 @@ void connectMQTT() {
       true
     );
 
-    // Subscribe command topic
+    // Subscribe command & dynamic delay topics
     mqttClient.subscribe(TOPIC_COMMAND, 0);
+    mqttClient.subscribe(TOPIC_DELAY, 0);
 
     // Initial relay status (retained for mobile app sync)
     mqttClient.publish(
@@ -445,10 +487,10 @@ void loop() {
     }
   }
 
-  // Automatic relay OFF after OPEN_DURATION
-  if (AUTO_OFF_ENABLED && relayActive) {
+  // Automatic relay OFF after openDuration (jika openDuration > 0)
+  if (AUTO_OFF_ENABLED && openDuration > 0 && relayActive) {
 
-    if (millis() - relayStartTime >= OPEN_DURATION) {
+    if (millis() - relayStartTime >= openDuration) {
 
       closeRelay();
 
