@@ -10,6 +10,7 @@ import {
   Lock,
   LockOpen,
   Power,
+  QrCode,
   RefreshCw,
   Send,
   Settings,
@@ -19,8 +20,13 @@ import {
   Terminal,
   UploadCloud,
   Wifi,
+  X,
   Zap,
 } from 'lucide-react';
+
+const APK_DIRECT_URL =
+  'https://github.com/delfin2492/smartlab-geo/releases/latest/download/SmartLab-GEO.apk';
+const PWA_HTTPS_URL = 'https://delfin2492.github.io/smartlab-geo/';
 
 const DEFAULT_CONFIG = {
   wsUrl: 'ws://mqtt.vantara.my.id:9001',
@@ -48,6 +54,7 @@ export default function App() {
   const [config, setConfig] = useState(loadConfig);
   const [formCfg, setFormCfg] = useState(config);
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'logs' | 'settings'
+  const [showInstallModal, setShowInstallModal] = useState(false);
 
   const [brokerState, setBrokerState] = useState('connecting'); // 'connected' | 'connecting' | 'disconnected' | 'https_blocked'
   const [relayStatus, setRelayStatus] = useState('OFF');
@@ -75,7 +82,7 @@ export default function App() {
     setToastMsg(msg);
     setTimeout(() => {
       setToastMsg((prev) => (prev === msg ? null : prev));
-    }, 3200);
+    }, 3400);
   };
 
   const addLog = (topic, payload, dir = 'RX') => {
@@ -93,7 +100,6 @@ export default function App() {
     ]);
   };
 
-  // Capture Android PWA install prompt
   useEffect(() => {
     const handler = (e) => {
       e.preventDefault();
@@ -103,7 +109,6 @@ export default function App() {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
-  // Connect to MQTT over WebSockets
   useEffect(() => {
     if (clientRef.current) {
       try {
@@ -111,7 +116,6 @@ export default function App() {
       } catch {}
     }
 
-    // Jika dibuka di HTTPS (misal GitHub Pages) tapi URL masih ws:// non-TLS
     const isHttpsPage = window.location.protocol === 'https:';
     const isWsInsecure = config.wsUrl.trim().toLowerCase().startsWith('ws://');
 
@@ -119,7 +123,7 @@ export default function App() {
       setBrokerState('https_blocked');
       addLog(
         'SYSTEM',
-        'Halaman HTTPS memblokir ws:// (Mixed Content). Izinkan Insecure Content di browser atau buka via HTTP / LAN.',
+        'Halaman HTTPS memblokir ws://. Gunakan Aplikasi APK Android atau izinkan Insecure Content di pengaturan situs browser.',
         'SYS'
       );
     } else {
@@ -158,7 +162,6 @@ export default function App() {
         { qos: 0 }
       );
 
-      // Jika aplikasi dibuka dari 1-Tap Shortcut Home Screen (?action=unlock)
       const params = new URLSearchParams(window.location.search);
       if (
         !autoTriggeredRef.current &&
@@ -239,7 +242,6 @@ export default function App() {
       return;
     }
 
-    // Fallback: Direct HTTP ke Wemos jika satu jaringan WiFi
     const targetIp =
       config.wemosDirectIp || (wemosIp !== '-' ? wemosIp : '');
     if (targetIp) {
@@ -259,15 +261,13 @@ export default function App() {
     showToast('Belum terhubung ke MQTT Broker!');
   };
 
-  const handleInstallPwa = async () => {
+  const handleNativePwaPrompt = async () => {
     if (deferredPrompt) {
       deferredPrompt.prompt();
       await deferredPrompt.userChoice;
       setDeferredPrompt(null);
     } else {
-      showToast(
-        'Di Chrome/Safari HP: klik menu titik tiga / Share -> pilih "Tambahkan ke Layar Utama" (Add to Home Screen).'
-      );
+      setShowInstallModal(true);
     }
   };
 
@@ -303,8 +303,8 @@ export default function App() {
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
               className="icon-btn"
-              title="Install ke Layar Utama HP"
-              onClick={handleInstallPwa}
+              title="Install Aplikasi & Widget di HP"
+              onClick={() => setShowInstallModal(true)}
             >
               <Smartphone size={18} />
             </button>
@@ -337,7 +337,7 @@ export default function App() {
                   : brokerState === 'connecting'
                   ? 'Connecting Broker...'
                   : brokerState === 'https_blocked'
-                  ? 'Mixed Content (ws://)'
+                  ? 'Gunakan APK / Allow WS'
                   : 'Broker Disconnected'}
               </div>
               <div className="status-sub">
@@ -377,39 +377,6 @@ export default function App() {
           >
             <Sparkles size={15} />
             <span>{toastMsg}</span>
-          </div>
-        )}
-
-        {/* HTTPS Mixed Content Helper Banner */}
-        {brokerState === 'https_blocked' && (
-          <div
-            style={{
-              margin: '12px 20px 0',
-              padding: '12px 14px',
-              borderRadius: '14px',
-              background: 'rgba(245, 158, 11, 0.15)',
-              border: '1px solid rgba(245, 158, 11, 0.4)',
-              color: '#fde68a',
-              fontSize: '0.73rem',
-              lineHeight: 1.45,
-            }}
-          >
-            <strong>Tips Koneksi Browser:</strong> Broker Anda menggunakan{' '}
-            <code>ws://mqtt.vantara.my.id:9001</code> (tanpa SSL). Jika dibuka
-            dari link HTTPS GitHub, klik ikon <strong>Gembok / Tune</strong> di
-            kiri atas address bar browser &rarr;{' '}
-            <strong>Site Settings &rarr; Insecure content &rarr; Allow</strong>,
-            atau buka langsung dari IP Wemos:{' '}
-            {effectiveIp ? (
-              <a
-                href={`http://${effectiveIp}/`}
-                style={{ color: '#38bdf8', fontWeight: 700 }}
-              >
-                http://{effectiveIp}/
-              </a>
-            ) : (
-              'http://<IP_WEMOS>/'
-            )}
           </div>
         )}
 
@@ -492,14 +459,14 @@ export default function App() {
               <button
                 type="button"
                 className="action-card"
-                onClick={handleInstallPwa}
+                onClick={() => setShowInstallModal(true)}
               >
                 <div className="action-icon cyan">
                   <Download size={20} />
                 </div>
                 <div>
-                  <div className="action-title">Widget HP</div>
-                  <div className="action-desc">Pasang di Layar Utama</div>
+                  <div className="action-title">Install di HP</div>
+                  <div className="action-desc">APK & Widget Layar</div>
                 </div>
               </button>
 
@@ -837,6 +804,199 @@ export default function App() {
           </main>
         )}
 
+        {/* MODAL: INSTALL APLIKASI & WIDGET LANGSUNG DI HP */}
+        {showInstallModal && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 100,
+              background: 'rgba(2, 6, 23, 0.82)',
+              backdropFilter: 'blur(10px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '18px',
+            }}
+            onClick={() => setShowInstallModal(false)}
+          >
+            <div
+              className="glass-card"
+              style={{
+                width: '100%',
+                maxWidth: '400px',
+                background: '#0f172a',
+                border: '1px solid rgba(56, 189, 248, 0.35)',
+                padding: '20px',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: '14px',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    fontWeight: 800,
+                    fontSize: '0.96rem',
+                  }}
+                >
+                  <Smartphone size={19} color="#38bdf8" />
+                  <span>Pasang Aplikasi & Widget di HP</span>
+                </div>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  style={{ width: 32, height: 32 }}
+                  onClick={() => setShowInstallModal(false)}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Opsi 1: File APK Asli (Tanpa Chrome Badge + Ada Widget Layar Utama Android) */}
+              <div
+                style={{
+                  padding: '14px',
+                  borderRadius: '16px',
+                  background: 'rgba(16, 185, 129, 0.1)',
+                  border: '1px solid rgba(16, 185, 129, 0.35)',
+                  marginBottom: '14px',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '0.82rem',
+                    fontWeight: 800,
+                    color: '#34d399',
+                    marginBottom: '6px',
+                  }}
+                >
+                  1. Install Aplikasi Android (.APK) + Widget HP
+                </div>
+                <p
+                  style={{
+                    fontSize: '0.73rem',
+                    color: '#cbd5e1',
+                    lineHeight: 1.45,
+                    marginBottom: '12px',
+                  }}
+                >
+                  Agar ter-install sebagai <strong>Aplikasi HP penuh</strong>{' '}
+                  (bukan sekadar pintasan Chrome) dan memiliki{' '}
+                  <strong>Tombol Widget BUKA PINTU di Layar Depan HP</strong>,
+                  unduh file <code>SmartLab-GEO.apk</code> (desain React ini):
+                </p>
+                <a
+                  href={APK_DIRECT_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="primary-btn"
+                  style={{
+                    textDecoration: 'none',
+                    background: 'linear-gradient(135deg, #10b981, #059669)',
+                    boxShadow: '0 8px 20px rgba(16, 185, 129, 0.3)',
+                  }}
+                >
+                  <Download size={16} />
+                  <span>Download SmartLab-GEO.apk (Langsung)</span>
+                </a>
+              </div>
+
+              {/* Opsi 2: Scan QR dari HP atau Install WebAPK via HTTPS */}
+              <div
+                style={{
+                  padding: '14px',
+                  borderRadius: '16px',
+                  background: 'rgba(30, 41, 59, 0.75)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    color: '#38bdf8',
+                    marginBottom: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                  }}
+                >
+                  <QrCode size={15} />
+                  <span>2. Pengguna iPhone (iOS) / Web PWA</span>
+                </div>
+                <p
+                  style={{
+                    fontSize: '0.72rem',
+                    color: '#94a3b8',
+                    lineHeight: 1.45,
+                    marginBottom: '10px',
+                  }}
+                >
+                  Buka link HTTPS resmi di Safari iPhone / Chrome HP agar bisa
+                  di-install penuh tanpa logo browser:
+                </p>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                  }}
+                >
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(
+                      APK_DIRECT_URL
+                    )}`}
+                    alt="QR Download APK"
+                    style={{
+                      width: 84,
+                      height: 84,
+                      borderRadius: '10px',
+                      background: '#fff',
+                      padding: '4px',
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div style={{ fontSize: '0.71rem', color: '#cbd5e1' }}>
+                    <div style={{ marginBottom: '6px' }}>
+                      <strong>Scan QR ini dengan kamera HP</strong> untuk
+                      langsung men-download <code>SmartLab-GEO.apk</code> ke HP.
+                    </div>
+                    <a
+                      href={PWA_HTTPS_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: '#38bdf8', fontWeight: 700 }}
+                    >
+                      Buka Web HTTPS (iOS PWA) &rarr;
+                    </a>
+                  </div>
+                </div>
+
+                {deferredPrompt && (
+                  <button
+                    type="button"
+                    className="primary-btn"
+                    style={{ marginTop: '12px' }}
+                    onClick={handleNativePwaPrompt}
+                  >
+                    <Smartphone size={16} />
+                    <span>Install Web App Sekarang</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Bottom Dock Navigation */}
         <nav className="bottom-nav">
           <button
@@ -870,4 +1030,3 @@ export default function App() {
     </div>
   );
 }
-
