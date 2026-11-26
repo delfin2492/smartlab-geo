@@ -8,6 +8,18 @@ const TOPIC_STATUS = 'smartlab-geo/door/exit/status';
 const TOPIC_AVAILABILITY = 'smartlab-geo/door/exit/availability';
 const TOPIC_IP = 'smartlab-geo/door/exit/ip';
 
+function parseBody(body) {
+  if (!body) return {};
+  if (typeof body === 'string') {
+    try {
+      return JSON.parse(body);
+    } catch {
+      return {};
+    }
+  }
+  return body;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -18,30 +30,23 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  const host = req.query?.host || req.body?.host || DEFAULT_HOST;
-  const port = Number(req.query?.port || req.body?.port || DEFAULT_PORT);
-  const username = req.body?.username || process.env.MQTT_USERNAME || '';
-  const password = req.body?.password || process.env.MQTT_PASSWORD || '';
+  const body = parseBody(req.body);
+  const host = req.query?.host || body.host || DEFAULT_HOST;
+  const port = Number(req.query?.port || body.port || DEFAULT_PORT);
+  const username = body.username || process.env.MQTT_USERNAME || '';
+  const password = body.password || process.env.MQTT_PASSWORD || '';
 
   const clientId = `SmartLabGEO_Vercel_${Math.random().toString(16).slice(2, 9)}`;
   const connectUrl = `mqtt://${host}:${port}`;
 
   if (req.method === 'POST') {
-    const command = String(req.body?.command || 'ON').trim().toUpperCase();
-    const topic = req.body?.topic || TOPIC_COMMAND;
+    const command = String(body.command || req.query?.command || 'ON')
+      .trim()
+      .toUpperCase();
+    const topic = body.topic || req.query?.topic || TOPIC_COMMAND;
 
     return new Promise((resolve) => {
       let finished = false;
-      const done = (code, data) => {
-        if (finished) return;
-        finished = true;
-        try {
-          client.end(true);
-        } catch {}
-        res.status(code).json(data);
-        resolve();
-      };
-
       const client = mqtt.connect(connectUrl, {
         clientId,
         clean: true,
@@ -50,12 +55,32 @@ export default async function handler(req, res) {
         ...(username ? { username, password } : {}),
       });
 
+      const done = (code, data) => {
+        if (finished) return;
+        finished = true;
+        try {
+          client.end(false, () => {
+            res.status(code).json(data);
+            resolve();
+          });
+          setTimeout(() => {
+            try {
+              res.status(code).json(data);
+            } catch {}
+            resolve();
+          }, 180);
+        } catch {
+          res.status(code).json(data);
+          resolve();
+        }
+      };
+
       const timer = setTimeout(() => {
         done(504, { ok: false, error: 'Timeout connecting to MQTT broker' });
       }, 4500);
 
       client.on('connect', () => {
-        client.publish(topic, command, { qos: 0, retain: false }, (err) => {
+        client.publish(topic, command, { qos: 1, retain: false }, (err) => {
           clearTimeout(timer);
           if (err) {
             done(500, { ok: false, error: err.message });
@@ -82,6 +107,14 @@ export default async function handler(req, res) {
       ip: null,
     };
 
+    const client = mqtt.connect(connectUrl, {
+      clientId,
+      clean: true,
+      connectTimeout: 4000,
+      reconnectPeriod: 0,
+      ...(username ? { username, password } : {}),
+    });
+
     const done = (code, data) => {
       if (finished) return;
       finished = true;
@@ -92,39 +125,40 @@ export default async function handler(req, res) {
       resolve();
     };
 
-    const client = mqtt.connect(connectUrl, {
-      clientId,
-      clean: true,
-      connectTimeout: 4000,
-      reconnectPeriod: 0,
-      ...(username ? { username, password } : {}),
-    });
-
     const timeout = setTimeout(() => {
       done(200, state);
     }, 1200);
 
     client.on('connect', () => {
-      client.subscribe([TOPIC_STATUS, TOPIC_AVAILABILITY, TOPIC_IP], { qos: 0 }, (err) => {
-        if (err) {
-          clearTimeout(timeout);
-          done(500, { ok: false, error: err.message });
-          return;
+      client.subscribe(
+        [TOPIC_STATUS, TOPIC_AVAILABILITY, TOPIC_IP],
+        { qos: 0 },
+        (err) => {
+          if (err) {
+            clearTimeout(timeout);
+            done(500, { ok: false, error: err.message });
+            return;
+          }
+          setTimeout(() => {
+            clearTimeout(timeout);
+            done(200, state);
+          }, 420);
         }
-        setTimeout(() => {
-          clearTimeout(timeout);
-          done(200, state);
-        }, 420);
-      });
+      );
     });
 
     client.on('message', (topic, message) => {
       const val = message.toString().trim();
       if (topic === TOPIC_STATUS) state.status = val.toUpperCase();
-      else if (topic === TOPIC_AVAILABILITY) state.availability = val.toLowerCase();
+      else if (topic === TOPIC_AVAILABILITY)
+        state.availability = val.toLowerCase();
       else if (topic === TOPIC_IP) state.ip = val;
 
-      if (state.status !== null && state.availability !== null && state.ip !== null) {
+      if (
+        state.status !== null &&
+        state.availability !== null &&
+        state.ip !== null
+      ) {
         clearTimeout(timeout);
         done(200, state);
       }
@@ -136,4 +170,3 @@ export default async function handler(req, res) {
     });
   });
 }
-
