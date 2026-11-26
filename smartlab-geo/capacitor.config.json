@@ -1,0 +1,9 @@
+{
+  "appId": "com.smartlab.geo",
+  "appName": "SmartLab-GEO",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  }
+}
