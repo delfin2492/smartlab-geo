@@ -545,14 +545,14 @@ export default function App() {
               <button
                 type="button"
                 className="action-card"
-                onClick={() => setShowInstallModal(true)}
+                onClick={handleNativePwaPrompt}
               >
                 <div className="action-icon cyan">
                   <Download size={20} />
                 </div>
                 <div>
-                  <div className="action-title">Aplikasi & Widget</div>
-                  <div className="action-desc">Pasang di Layar HP</div>
+                  <div className="action-title">Install PWA</div>
+                  <div className="action-desc">Pasang Aplikasi di HP</div>
                 </div>
               </button>
 
@@ -1029,7 +1029,24 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Opsi 1: Install dari Vercel PWA atau Download APK */}
+              {/* Tombol Install PWA 1-Klik jika Browser sudah di HTTPS Vercel */}
+              {deferredPrompt && (
+                <button
+                  type="button"
+                  className="primary-btn"
+                  style={{
+                    marginBottom: '14px',
+                    background: 'linear-gradient(135deg, #10b981, #059669)',
+                    boxShadow: '0 8px 20px rgba(16, 185, 129, 0.3)',
+                  }}
+                  onClick={handleNativePwaPrompt}
+                >
+                  <Download size={17} />
+                  <span>Install Aplikasi PWA Sekarang (1-Klik)</span>
+                </button>
+              )}
+
+              {/* Panduan 1: Install Aplikasi PWA Murni dari Vercel HTTPS */}
               <div
                 style={{
                   padding: '14px',
@@ -1047,37 +1064,28 @@ export default function App() {
                     marginBottom: '6px',
                   }}
                 >
-                  1. Download APK Android + Widget Orb Modern
+                  1. Cara Install PWA Tanpa APK (Android & iPhone)
                 </div>
                 <p
                   style={{
-                    fontSize: '0.72rem',
+                    fontSize: '0.73rem',
                     color: '#cbd5e1',
-                    lineHeight: 1.45,
-                    marginBottom: '12px',
+                    lineHeight: 1.5,
                   }}
                 >
-                  Untuk memasang <strong>Widget Lingkaran Modern</strong> di
-                  layar depan HP Android Anda, unduh file{' '}
-                  <code>SmartLab-GEO.apk</code> di bawah ini:
+                  • Pastikan Anda membuka dashboard ini melalui link{' '}
+                  <strong>HTTPS Vercel</strong> (bukan IP lokal{' '}
+                  <code>http://192.168...</code>).
+                  <br />• <strong>Android (Chrome):</strong> Klik menu titik
+                  tiga di pojok kanan atas browser &rarr; pilih{' '}
+                  <strong>&quot;Install aplikasi&quot; (Install App)</strong>.
+                  <br />• <strong>iPhone (Safari):</strong> Klik tombol{' '}
+                  <strong>Share</strong> di bawah &rarr; pilih{' '}
+                  <strong>&quot;Add to Home Screen&quot;</strong>.
                 </p>
-                <a
-                  href={APK_DIRECT_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="primary-btn"
-                  style={{
-                    textDecoration: 'none',
-                    background: 'linear-gradient(135deg, #10b981, #059669)',
-                    boxShadow: '0 8px 20px rgba(16, 185, 129, 0.3)',
-                  }}
-                >
-                  <Download size={16} />
-                  <span>Download SmartLab-GEO.apk</span>
-                </a>
               </div>
 
-              {/* Opsi 2: Install Web App dari Vercel HTTPS */}
+              {/* Panduan 2: Cara Memunculkan Tombol Widget 1-Tap dari PWA */}
               <div
                 style={{
                   padding: '14px',
@@ -1097,31 +1105,26 @@ export default function App() {
                     gap: '6px',
                   }}
                 >
-                  <Globe size={15} />
-                  <span>2. Install langsung dari Link Vercel (PWA)</span>
+                  <Zap size={15} />
+                  <span>2. Cara Buat Tombol 1-Tap Buka Pintu di Layar HP</span>
                 </div>
                 <p
                   style={{
                     fontSize: '0.72rem',
-                    color: '#94a3b8',
-                    lineHeight: 1.45,
-                    marginBottom: '10px',
+                    color: '#cbd5e1',
+                    lineHeight: 1.5,
                   }}
                 >
-                  Saat dibuka melalui link <strong>HTTPS Vercel</strong> di
-                  Chrome (Android) atau Safari (iPhone), aplikasi otomatis
-                  ter-install penuh sebagai aplikasi mandiri (*WebAPK*).
+                  • <strong>Tarik Shortcut ke Home Screen (Android):</strong>{' '}
+                  Setelah PWA ter-install di HP, <strong>tekan & tahan</strong>{' '}
+                  ikon aplikasi <strong>SmartLab-GEO</strong> di layar HP &rarr;
+                  tarik tombol <strong>&quot;Buka Pintu Sekarang&quot;</strong>{' '}
+                  ke layar depan HP Anda.
+                  <br />• <strong>Mode Auto-Buka (iPhone & Android):</strong>{' '}
+                  Atau aktifkan centang <strong>Mode 1-Tap Widget</strong> di
+                  tab <em>Pengaturan & OTA</em> agar pintu langsung terbuka
+                  begitu ikon aplikasi disentuh.
                 </p>
-                {deferredPrompt && (
-                  <button
-                    type="button"
-                    className="primary-btn"
-                    onClick={handleNativePwaPrompt}
-                  >
-                    <Smartphone size={16} />
-                    <span>Install Web App Sekarang</span>
-                  </button>
-                )}
               </div>
             </div>
           </div>
