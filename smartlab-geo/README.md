@@ -1,31 +1,40 @@
-# SmartLab-GEO - Flutter MQTT + Home Screen Widget
+# SmartLab-GEO • React Mobile PWA & Wemos D1 Mini MQTT + OTA
 
-Aplikasi mobile (Android & iOS) berbasis **Flutter** untuk mengontrol dan memantau **Wemos D1 Mini Door Exit** ([wemos.ino](../wemos.ino)) secara real-time melalui protokol **MQTT TCP (`mqtt.vantara.my.id:1883`)**, dilengkapi fitur **Tombol Widget di Layar Utama HP (Home Screen Widget)** untuk membuka pintu dalam 1 sentuhan tanpa perlu membuka aplikasi.
-
----
-
-## Topic MQTT (`smartlab-geo`)
-- **Command:** `smartlab-geo/door/exit/command` (`ON` / `OFF`)
-- **Status:** `smartlab-geo/door/exit/status` (`ON` / `OFF`)
-- **Availability:** `smartlab-geo/door/exit/availability` (`online` / `offline`)
+Sistem kontrol pintu pintar (**Smart Door Exit**) berbasis **Wemos D1 Mini (ESP8266)** dan **React Progressive Web App (PWA)** dengan tampilan dashboard mobile modern (Android & iOS).
 
 ---
 
-## Cara Cetak File `.apk` Otomatis via GitHub Actions (Tanpa Install Flutter di PC)
+## Fitur Utama React PWA (`smartlab-geo/`)
+1. **Desain Mobile Smart Home Profesional**:
+   - Tombol utama **"BUKA PINTU"** (*tactile glowing orb*) dengan animasi cincin, efek getar (*haptic*), dan status *real-time* (`TERBUKA` hijau / `TERKUNCI` biru).
+   - Indikator *real-time* status koneksi MQTT (`ws://mqtt.vantara.my.id:9001`), status perangkat `WEMOS: ONLINE / OFFLINE`, serta alamat IP lokal Wemos.
+   - Ringkasan telemetri pintu (Status Relay, Jumlah Akses Dibuka, Waktu Terakhir Buka).
+2. **Bisa Di-install di Android & iPhone (PWA + 1-Tap Home Screen Shortcut)**:
+   - Buka web di Chrome (Android) atau Safari (iPhone) -> pilih **"Tambahkan ke Layar Utama" (Add to Home Screen)**.
+   - Aplikasi akan tampil *full-screen* tanpa *address bar* persis seperti aplikasi native.
+   - Mendukung **Mode 1-Tap Widget** (di tab *Pengaturan & OTA* atau shortcut `?action=unlock`): begitu ikon di layar utama HP disentuh, pintu langsung terbuka otomatis!
+3. **Update Firmware Wemos via WiFi (OTA)**:
+   - Mendukung **ArduinoOTA** (upload langsung dari Arduino IDE via Network Port `SmartLab-GEO-DoorExit`) dan **Web OTA** (`http://<IP_WEMOS>/update`, user: `admin`, pass: `admin`).
 
-File workflow otomatis sudah disiapkan di [.github/workflows/build-apk.yml](../.github/workflows/build-apk.yml). Server GitHub akan otomatis men-generate kerangka Android, menyuntikkan konfigurasi *Home Screen Widget* ke `AndroidManifest.xml`, dan meng-compile file **`SmartLab-GEO.apk`**.
+---
 
-### Langkah-langkah:
-1. Buat repository baru di GitHub (misalnya bernama `smartlab-geo`).
-2. Buka terminal PowerShell di folder `E:\Delfin\Product Engineer\wemos`, lalu jalankan perintah berikut untuk meng-upload kode ke GitHub:
-   ```powershell
-   git init
-   git add .
-   git commit -m "Initial SmartLab-GEO Wemos & Flutter App"
-   git branch -M main
-   git remote add origin https://github.com/USERNAME_ANDA/smartlab-geo.git
-   git push -u origin main
-   ```
-3. Buka halaman repository GitHub Anda di browser -> klik tab **Actions** di bagian atas.
-4. Anda akan melihat proses **"Build SmartLab-GEO Android APK"** sedang berjalan (tunggu sekitar 3–4 menit hingga centang hijau).
-5. Klik hasil build tersebut -> gulir ke bagian paling bawah (**Artifacts**) -> klik **`SmartLab-GEO-APK`** untuk mengunduh file **`SmartLab-GEO.apk`** dan install di HP Android Anda!
+## Topic MQTT (`mqtt.vantara.my.id`)
+- **TCP Port (Wemos):** `1883`
+- **WebSocket Port (React PWA):** `9001` (`ws://mqtt.vantara.my.id:9001`)
+- **Command Topic:** `smartlab-geo/door/exit/command` (`ON` / `OFF`)
+- **Status Topic:** `smartlab-geo/door/exit/status` (`ON` / `OFF`)
+- **Availability Topic:** `smartlab-geo/door/exit/availability` (`online` / `offline`)
+- **Local IP Topic:** `smartlab-geo/door/exit/ip`
+
+---
+
+## Cara Menjalankan React PWA di PC & HP
+
+Di dalam folder `smartlab-geo`, jalankan:
+```bash
+npm install
+npm run dev
+```
+- **Buka di PC:** `http://localhost:5173`
+- **Buka di HP (Android / iPhone):** Buka link `Network: http://192.168.x.x:5173` yang muncul di terminal, lalu pilih **Add to Home Screen** di browser HP Anda.
+

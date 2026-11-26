@@ -1,0 +1,35 @@
+{
+  "name": "SmartLab-GEO Smart Door Controller",
+  "short_name": "SmartLab-GEO",
+  "description": "Aplikasi Kontrol Pintu & Smart Home SmartLab-GEO berbasis MQTT",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#060B19",
+  "theme_color": "#060B19",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Buka Pintu Sekarang",
+      "short_name": "Buka Pintu",
+      "description": "Langsung buka kunci pintu exit SmartLab-GEO (1-Tap)",
+      "url": "./index.html?action=unlock",
+      "icons": [
+        {
+          "src": "./icon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
+  ]
+}
+

@@ -219,16 +219,37 @@ void setupOTA() {
 
   httpServer.on("/", HTTP_GET, []() {
     String html = "<html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
-                  "<title>SmartLab-GEO OTA</title>"
-                  "<style>body{font-family:sans-serif;background:#0f172a;color:#f8fafc;text-align:center;padding:30px;}"
-                  ".card{background:#1e293b;padding:24px;border-radius:16px;max-width:400px;margin:auto;}"
-                  "a.btn{display:inline-block;margin-top:16px;padding:12px 20px;background:#2563eb;color:#fff;"
-                  "text-decoration:none;border-radius:10px;font-weight:bold;}</style></head><body>"
+                  "<title>SmartLab-GEO OTA & Control</title>"
+                  "<style>body{font-family:sans-serif;background:#050914;color:#f8fafc;text-align:center;padding:24px;}"
+                  ".card{background:#131c31;padding:24px;border-radius:20px;max-width:400px;margin:auto;border:1px solid #1e293b;}"
+                  "a.btn,button.btn{display:block;width:100%;box-sizing:border-box;margin-top:12px;padding:14px 20px;background:#2563eb;color:#fff;"
+                  "text-decoration:none;border:none;border-radius:12px;font-weight:bold;font-size:15px;cursor:pointer;}"
+                  "a.btn-ota{background:#334155;}</style></head><body>"
                   "<div class='card'><h2>SmartLab-GEO Door Exit</h2>"
                   "<p>IP Address: <b>" + WiFi.localIP().toString() + "</b></p>"
-                  "<p>Status Relay: <b>" + String(relayActive ? "ON" : "OFF") + "</b></p>"
-                  "<a class='btn' href='/update'>Update Firmware (Web OTA)</a></div></body></html>";
+                  "<p>Status Relay: <b>" + String(relayActive ? "ON (TERBUKA)" : "OFF (TERKUNCI)") + "</b></p>"
+                  "<a class='btn' href='/api/open'>BUKA PINTU SEKARANG (ON)</a>"
+                  "<a class='btn btn-ota' href='/update'>Update Firmware (Web OTA)</a></div></body></html>";
     httpServer.send(200, "text/html", html);
+  });
+
+  // REST API lokal dengan CORS agar React PWA & iPhone Shortcuts juga bisa memicu via WiFi lokal
+  httpServer.on("/api/open", HTTP_ANY, []() {
+    httpServer.sendHeader("Access-Control-Allow-Origin", "*");
+    openDoor();
+    httpServer.send(200, "application/json", "{\"status\":\"ON\"}");
+  });
+
+  httpServer.on("/api/close", HTTP_ANY, []() {
+    httpServer.sendHeader("Access-Control-Allow-Origin", "*");
+    closeRelay();
+    httpServer.send(200, "application/json", "{\"status\":\"OFF\"}");
+  });
+
+  httpServer.on("/api/status", HTTP_GET, []() {
+    httpServer.sendHeader("Access-Control-Allow-Origin", "*");
+    String json = "{\"status\":\"" + String(relayActive ? "ON" : "OFF") + "\",\"ip\":\"" + WiFi.localIP().toString() + "\"}";
+    httpServer.send(200, "application/json", json);
   });
 
   httpServer.begin();

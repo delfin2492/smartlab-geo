@@ -1,115 +1,37 @@
-name: Build SmartLab-GEO Android APK
+name: Build & Deploy SmartLab-GEO React PWA
 
 on:
   push:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
 jobs:
-  build-apk:
-    name: Compile Flutter APK
+  build-and-deploy:
+    name: Build React PWA
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          node-version: '20'
 
-      - name: Setup Flutter SDK
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-
-      - name: Prepare Flutter Native Project & Inject Home Screen Widget
-        shell: bash
+      - name: Install & Build React PWA
+        working-directory: ./smartlab-geo
         run: |
-          set -e
-          if [ -d "smartlab-geo" ]; then
-            cd smartlab-geo
-          fi
+          npm install
+          npm run build
 
-          # Simpan file custom kita sebelum generate kerangka native Flutter
-          mkdir -p /tmp/smartlab_backup
-          cp -r pubspec.yaml lib android /tmp/smartlab_backup/
-
-          # Generate kerangka proyek Android & iOS
-          flutter create --org com.smartlab --project-name smartlab_geo --platforms=android,ios .
-
-          # Kembalikan file custom kita (lib, pubspec.yaml, dan kode widget Kotlin/XML)
-          cp -r /tmp/smartlab_backup/pubspec.yaml .
-          cp -r /tmp/smartlab_backup/lib/* lib/
-          cp -r /tmp/smartlab_backup/android/* android/
-
-          # Otomatis tambahkan Permission INTERNET & Receiver Widget ke AndroidManifest.xml
-          python3 - << 'EOF'
-          manifest_path = "android/app/src/main/AndroidManifest.xml"
-          with open(manifest_path, "r", encoding="utf-8") as f:
-              content = f.read()
-
-          if "android.permission.INTERNET" not in content:
-              content = content.replace(
-                  "<application",
-                  '<uses-permission android:name="android.permission.INTERNET" />\n    <application',
-                  1,
-              )
-
-          widget_receivers = """
-                  <!-- SmartLab-GEO Home Screen Widget Receiver -->
-                  <receiver
-                      android:name=".DoorWidgetProvider"
-                      android:exported="true">
-                      <intent-filter>
-                          <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                      </intent-filter>
-                      <meta-data
-                          android:name="android.appwidget.provider"
-                          android:resource="@xml/door_widget_info" />
-                  </receiver>
-
-                  <receiver
-                      android:name="es.antonborri.home_widget.HomeWidgetBackgroundReceiver"
-                      android:exported="true">
-                      <intent-filter>
-                          <action android:name="es.antonborri.home_widget.action.BACKGROUND" />
-                      </intent-filter>
-                  </receiver>
-
-                  <service
-                      android:name="es.antonborri.home_widget.HomeWidgetBackgroundService"
-                      android:permission="android.permission.BIND_JOB_SERVICE"
-                      android:exported="true" />
-              </application>"""
-
-          if "DoorWidgetProvider" not in content:
-              content = content.replace("</application>", widget_receivers, 1)
-
-          with open(manifest_path, "w", encoding="utf-8") as f:
-              f.write(content)
-          print("AndroidManifest.xml updated successfully.")
-          EOF
-
-      - name: Install Dependencies & Build Release APK
-        shell: bash
-        run: |
-          set -e
-          if [ -d "smartlab-geo" ]; then
-            cd smartlab-geo
-          fi
-          flutter pub get
-          flutter build apk --release
-
-          mkdir -p /tmp/apk_out
-          cp build/app/outputs/flutter-apk/app-release.apk /tmp/apk_out/SmartLab-GEO.apk
-
-      - name: Upload SmartLab-GEO.apk Artifact
+      - name: Upload Built Web App Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SmartLab-GEO-APK
-          path: /tmp/apk_out/SmartLab-GEO.apk
-          if-no-files-found: error
-
+          name: SmartLab-GEO-Web-PWA
+          path: ./smartlab-geo/dist
