@@ -6,6 +6,7 @@ import {
   DoorOpen,
   Download,
   ExternalLink,
+  Globe,
   KeyRound,
   Lock,
   LockOpen,
@@ -26,10 +27,11 @@ import {
 
 const APK_DIRECT_URL =
   'https://github.com/delfin2492/smartlab-geo/releases/latest/download/SmartLab-GEO.apk';
-const PWA_HTTPS_URL = 'https://delfin2492.github.io/smartlab-geo/';
 
 const DEFAULT_CONFIG = {
   wsUrl: 'ws://mqtt.vantara.my.id:9001',
+  mqttHost: 'mqtt.vantara.my.id',
+  mqttPort: 1883,
   username: '',
   password: '',
   topicCommand: 'smartlab-geo/door/exit/command',
@@ -56,7 +58,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'logs' | 'settings'
   const [showInstallModal, setShowInstallModal] = useState(false);
 
-  const [brokerState, setBrokerState] = useState('connecting'); // 'connected' | 'connecting' | 'disconnected' | 'https_blocked'
+  const [brokerState, setBrokerState] = useState('connecting'); // 'connected' | 'cloud_bridge' | 'connecting' | 'disconnected'
   const [relayStatus, setRelayStatus] = useState('OFF');
   const [wemosAvail, setWemosAvail] = useState('online');
   const [wemosIp, setWemosIp] = useState(
@@ -77,6 +79,7 @@ export default function App() {
 
   const clientRef = useRef(null);
   const autoTriggeredRef = useRef(false);
+  const bridgeIntervalRef = useRef(null);
 
   const showToast = (msg) => {
     setToastMsg(msg);
@@ -109,27 +112,77 @@ export default function App() {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
+  // Fungsi Polling via Vercel Serverless Bridge (/api/mqtt) ketika diakses via HTTPS publik
+  const syncFromCloudBridge = async (isInitial = false) => {
+    try {
+      const res = await fetch('/api/mqtt', { method: 'GET' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data && data.ok) {
+        setBrokerState('cloud_bridge');
+        if (data.status) setRelayStatus(data.status);
+        if (data.availability) setWemosAvail(data.availability);
+        if (data.ip) {
+          setWemosIp(data.ip);
+          localStorage.setItem('smartlab_wemos_ip', data.ip);
+        }
+        if (isInitial) {
+          addLog(
+            'VERCEL_BRIDGE',
+            `Terhubung ke ${data.broker || 'mqtt.vantara.my.id:1883'} via HTTPS Cloud Bridge`,
+            'SYS'
+          );
+        }
+        return true;
+      }
+    } catch {
+      // Abaikan jika bukan di Vercel
+    }
+    return false;
+  };
+
   useEffect(() => {
     if (clientRef.current) {
       try {
         clientRef.current.end(true);
       } catch {}
     }
+    if (bridgeIntervalRef.current) {
+      clearInterval(bridgeIntervalRef.current);
+      bridgeIntervalRef.current = null;
+    }
 
     const isHttpsPage = window.location.protocol === 'https:';
     const isWsInsecure = config.wsUrl.trim().toLowerCase().startsWith('ws://');
 
+    // Jika diakses dari Vercel HTTPS publik & broker menggunakan ws://, gunakan Vercel Serverless Bridge (/api/mqtt)
     if (isHttpsPage && isWsInsecure) {
-      setBrokerState('https_blocked');
-      addLog(
-        'SYSTEM',
-        'Halaman HTTPS memblokir ws://. Gunakan Aplikasi APK Android atau izinkan Insecure Content di pengaturan situs browser.',
-        'SYS'
-      );
-    } else {
       setBrokerState('connecting');
+      syncFromCloudBridge(true).then((ok) => {
+        if (!ok) setBrokerState('disconnected');
+      });
+      bridgeIntervalRef.current = setInterval(() => {
+        syncFromCloudBridge(false);
+      }, 4000);
+
+      const params = new URLSearchParams(window.location.search);
+      if (
+        !autoTriggeredRef.current &&
+        (params.get('action') === 'unlock' || config.autoUnlockOnLaunch)
+      ) {
+        autoTriggeredRef.current = true;
+        setTimeout(() => {
+          triggerDoorCommand('ON', true);
+        }, 300);
+      }
+
+      return () => {
+        if (bridgeIntervalRef.current) clearInterval(bridgeIntervalRef.current);
+      };
     }
 
+    // Koneksi langsung WebSocket (saat di APK Android, Localhost, atau WSS)
+    setBrokerState('connecting');
     const clientId = `SmartLabGEO_PWA_${Math.random().toString(16).slice(2, 8)}`;
     const options = {
       clientId,
@@ -179,9 +232,7 @@ export default function App() {
     });
 
     client.on('close', () => {
-      setBrokerState((prev) =>
-        prev === 'https_blocked' ? 'https_blocked' : 'disconnected'
-      );
+      setBrokerState('disconnected');
     });
 
     client.on('error', (err) => {
@@ -225,6 +276,7 @@ export default function App() {
     setIsPressing(true);
     setTimeout(() => setIsPressing(false), 220);
 
+    // 1. Jika terhubung via Direct WebSocket MQTT (APK / Local / WSS)
     const client = clientRef.current;
     if (client && client.connected) {
       client.publish(config.topicCommand, cmd, { qos: 0, retain: false });
@@ -242,6 +294,38 @@ export default function App() {
       return;
     }
 
+    // 2. Jika berjalan di Vercel Public HTTPS (/api/mqtt Serverless Bridge)
+    try {
+      if (cmd === 'ON') setRelayStatus('ON');
+      const res = await fetch('/api/mqtt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          command: cmd,
+          topic: config.topicCommand,
+          username: config.username,
+          password: config.password,
+        }),
+      });
+      if (res.ok) {
+        setBrokerState('cloud_bridge');
+        addLog(config.topicCommand, `${cmd} (via Vercel HTTPS)`, 'TX');
+        if (cmd === 'ON') {
+          recordUnlockStats();
+          showToast('Pintu Dibuka via Cloud HTTPS!');
+          setTimeout(() => {
+            setRelayStatus('OFF');
+            syncFromCloudBridge(false);
+          }, 1250);
+        } else {
+          setRelayStatus('OFF');
+          showToast('Perintah OFF terkirim via Cloud HTTPS!');
+        }
+        return;
+      }
+    } catch {}
+
+    // 3. Fallback: Direct HTTP ke Wemos jika satu jaringan WiFi
     const targetIp =
       config.wemosDirectIp || (wemosIp !== '-' ? wemosIp : '');
     if (targetIp) {
@@ -280,6 +364,8 @@ export default function App() {
   };
 
   const isDoorOpen = relayStatus === 'ON';
+  const isConnected =
+    brokerState === 'connected' || brokerState === 'cloud_bridge';
   const effectiveIp =
     config.wemosDirectIp || (wemosIp !== '-' ? wemosIp : null);
 
@@ -323,7 +409,7 @@ export default function App() {
           <div className="status-item">
             <span
               className={`pulse-dot ${
-                brokerState === 'connected'
+                isConnected
                   ? 'online'
                   : brokerState === 'connecting'
                   ? 'connecting'
@@ -333,17 +419,17 @@ export default function App() {
             <div style={{ minWidth: 0 }}>
               <div className="status-label">
                 {brokerState === 'connected'
-                  ? 'MQTT Connected'
+                  ? 'MQTT Live Socket'
+                  : brokerState === 'cloud_bridge'
+                  ? 'MQTT Cloud HTTPS'
                   : brokerState === 'connecting'
                   ? 'Connecting Broker...'
-                  : brokerState === 'https_blocked'
-                  ? 'Gunakan APK / Allow WS'
                   : 'Broker Disconnected'}
               </div>
               <div className="status-sub">
                 {effectiveIp
                   ? `Wemos IP: ${effectiveIp}`
-                  : config.wsUrl.replace(/^wss?:\/\//, '')}
+                  : 'mqtt.vantara.my.id'}
               </div>
             </div>
           </div>
@@ -465,8 +551,8 @@ export default function App() {
                   <Download size={20} />
                 </div>
                 <div>
-                  <div className="action-title">Install di HP</div>
-                  <div className="action-desc">APK & Widget Layar</div>
+                  <div className="action-title">Aplikasi & Widget</div>
+                  <div className="action-desc">Pasang di Layar HP</div>
                 </div>
               </button>
 
@@ -646,7 +732,7 @@ export default function App() {
 
               <div className="form-group">
                 <label className="form-label">
-                  MQTT WebSocket URL (Port 9001 Aktif)
+                  MQTT WebSocket URL (Untuk APK / Localhost)
                 </label>
                 <input
                   className="form-input"
@@ -804,19 +890,19 @@ export default function App() {
           </main>
         )}
 
-        {/* MODAL: INSTALL APLIKASI & WIDGET LANGSUNG DI HP */}
+        {/* MODAL: INSTALL APLIKASI & PREVIEW WIDGET MODERN DI HP */}
         {showInstallModal && (
           <div
             style={{
               position: 'fixed',
               inset: 0,
               zIndex: 100,
-              background: 'rgba(2, 6, 23, 0.82)',
-              backdropFilter: 'blur(10px)',
+              background: 'rgba(2, 6, 23, 0.84)',
+              backdropFilter: 'blur(12px)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: '18px',
+              padding: '16px',
             }}
             onClick={() => setShowInstallModal(false)}
           >
@@ -824,10 +910,12 @@ export default function App() {
               className="glass-card"
               style={{
                 width: '100%',
-                maxWidth: '400px',
-                background: '#0f172a',
+                maxWidth: '405px',
+                background: '#0b1121',
                 border: '1px solid rgba(56, 189, 248, 0.35)',
                 padding: '20px',
+                maxHeight: '90dvh',
+                overflowY: 'auto',
               }}
               onClick={(e) => e.stopPropagation()}
             >
@@ -849,7 +937,7 @@ export default function App() {
                   }}
                 >
                   <Smartphone size={19} color="#38bdf8" />
-                  <span>Pasang Aplikasi & Widget di HP</span>
+                  <span>Aplikasi & Widget SmartLab-GEO</span>
                 </div>
                 <button
                   type="button"
@@ -861,14 +949,94 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Opsi 1: File APK Asli (Tanpa Chrome Badge + Ada Widget Layar Utama Android) */}
+              {/* Preview Tampilan Widget Baru di Layar Depan HP */}
+              <div
+                style={{
+                  padding: '16px',
+                  borderRadius: '22px',
+                  background:
+                    'radial-gradient(circle at 50% 42%, rgba(37, 99, 235, 0.25), #050914 78%)',
+                  border: '1px solid rgba(56, 189, 248, 0.3)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  marginBottom: '14px',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '0.64rem',
+                    fontWeight: 700,
+                    letterSpacing: '0.08em',
+                    color: '#94a3b8',
+                    padding: '3px 10px',
+                    borderRadius: '999px',
+                    background: 'rgba(255,255,255,0.06)',
+                    marginBottom: '10px',
+                  }}
+                >
+                  PREVIEW WIDGET LAYAR DEPAN HP
+                </div>
+                <div
+                  style={{
+                    width: 108,
+                    height: 108,
+                    borderRadius: '50%',
+                    padding: '7px',
+                    border: '1.5px dashed rgba(56, 189, 248, 0.45)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      borderRadius: '50%',
+                      background:
+                        'linear-gradient(145deg, #2563eb 0%, #1d4ed8 60%, #0f172a 100%)',
+                      border: '2px solid rgba(255,255,255,0.25)',
+                      boxShadow: '0 8px 22px rgba(37, 99, 235, 0.45)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '3px',
+                    }}
+                  >
+                    <KeyRound size={24} color="#fff" />
+                    <span
+                      style={{
+                        fontSize: '0.68rem',
+                        fontWeight: 800,
+                        color: '#fff',
+                      }}
+                    >
+                      BUKA PINTU
+                    </span>
+                  </div>
+                </div>
+                <div
+                  style={{
+                    marginTop: '8px',
+                    fontSize: '0.68rem',
+                    fontWeight: 700,
+                    color: '#34d399',
+                  }}
+                >
+                  ● SIAP BUKA (1-TAP)
+                </div>
+              </div>
+
+              {/* Opsi 1: Install dari Vercel PWA atau Download APK */}
               <div
                 style={{
                   padding: '14px',
                   borderRadius: '16px',
                   background: 'rgba(16, 185, 129, 0.1)',
                   border: '1px solid rgba(16, 185, 129, 0.35)',
-                  marginBottom: '14px',
+                  marginBottom: '12px',
                 }}
               >
                 <div
@@ -879,20 +1047,19 @@ export default function App() {
                     marginBottom: '6px',
                   }}
                 >
-                  1. Install Aplikasi Android (.APK) + Widget HP
+                  1. Download APK Android + Widget Orb Modern
                 </div>
                 <p
                   style={{
-                    fontSize: '0.73rem',
+                    fontSize: '0.72rem',
                     color: '#cbd5e1',
                     lineHeight: 1.45,
                     marginBottom: '12px',
                   }}
                 >
-                  Agar ter-install sebagai <strong>Aplikasi HP penuh</strong>{' '}
-                  (bukan sekadar pintasan Chrome) dan memiliki{' '}
-                  <strong>Tombol Widget BUKA PINTU di Layar Depan HP</strong>,
-                  unduh file <code>SmartLab-GEO.apk</code> (desain React ini):
+                  Untuk memasang <strong>Widget Lingkaran Modern</strong> di
+                  layar depan HP Android Anda, unduh file{' '}
+                  <code>SmartLab-GEO.apk</code> di bawah ini:
                 </p>
                 <a
                   href={APK_DIRECT_URL}
@@ -906,11 +1073,11 @@ export default function App() {
                   }}
                 >
                   <Download size={16} />
-                  <span>Download SmartLab-GEO.apk (Langsung)</span>
+                  <span>Download SmartLab-GEO.apk</span>
                 </a>
               </div>
 
-              {/* Opsi 2: Scan QR dari HP atau Install WebAPK via HTTPS */}
+              {/* Opsi 2: Install Web App dari Vercel HTTPS */}
               <div
                 style={{
                   padding: '14px',
@@ -930,8 +1097,8 @@ export default function App() {
                     gap: '6px',
                   }}
                 >
-                  <QrCode size={15} />
-                  <span>2. Pengguna iPhone (iOS) / Web PWA</span>
+                  <Globe size={15} />
+                  <span>2. Install langsung dari Link Vercel (PWA)</span>
                 </div>
                 <p
                   style={{
@@ -941,51 +1108,14 @@ export default function App() {
                     marginBottom: '10px',
                   }}
                 >
-                  Buka link HTTPS resmi di Safari iPhone / Chrome HP agar bisa
-                  di-install penuh tanpa logo browser:
+                  Saat dibuka melalui link <strong>HTTPS Vercel</strong> di
+                  Chrome (Android) atau Safari (iPhone), aplikasi otomatis
+                  ter-install penuh sebagai aplikasi mandiri (*WebAPK*).
                 </p>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '12px',
-                  }}
-                >
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(
-                      APK_DIRECT_URL
-                    )}`}
-                    alt="QR Download APK"
-                    style={{
-                      width: 84,
-                      height: 84,
-                      borderRadius: '10px',
-                      background: '#fff',
-                      padding: '4px',
-                      flexShrink: 0,
-                    }}
-                  />
-                  <div style={{ fontSize: '0.71rem', color: '#cbd5e1' }}>
-                    <div style={{ marginBottom: '6px' }}>
-                      <strong>Scan QR ini dengan kamera HP</strong> untuk
-                      langsung men-download <code>SmartLab-GEO.apk</code> ke HP.
-                    </div>
-                    <a
-                      href={PWA_HTTPS_URL}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{ color: '#38bdf8', fontWeight: 700 }}
-                    >
-                      Buka Web HTTPS (iOS PWA) &rarr;
-                    </a>
-                  </div>
-                </div>
-
                 {deferredPrompt && (
                   <button
                     type="button"
                     className="primary-btn"
-                    style={{ marginTop: '12px' }}
                     onClick={handleNativePwaPrompt}
                   >
                     <Smartphone size={16} />

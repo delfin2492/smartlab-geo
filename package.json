@@ -1,0 +1,8 @@
+{
+  "name": "smartlab-geo-root",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "mqtt": "^5.10.1"
+  }
+}
